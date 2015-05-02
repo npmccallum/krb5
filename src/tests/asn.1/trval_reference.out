@@ -1515,3 +1515,15 @@ encode_krb5_kkdcp_message:
       17 04 15 6b 72 62 41 53 4e 2e 31 20 74 65 73 74     ...krbASN.1 test
       20 6d 65 73 73 61 67 65                              message
 .  [1] [General string] "krb5data"
+
+encode_krb5_secure_cookie:
+
+[Sequence/Sequence Of]
+.  [0] [Generalized Time] "20150502024314Z"
+.  [1] [Sequence/Sequence Of]
+.  .  [Sequence/Sequence Of]
+.  .  .  [1] [Integer] 13
+.  .  .  [2] [Octet String] "pa-data"
+.  .  [Sequence/Sequence Of]
+.  .  .  [1] [Integer] 13
+.  .  .  [2] [Octet String] "pa-data"

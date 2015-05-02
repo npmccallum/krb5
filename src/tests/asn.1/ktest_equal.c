@@ -1051,3 +1051,14 @@ ktest_equal_kkdcp_message(krb5_kkdcp_message *ref, krb5_kkdcp_message *var)
     p = p && (ref->dclocator_hint == var->dclocator_hint);
     return p;
 }
+
+int
+ktest_equal_secure_cookie(krb5_secure_cookie *ref, krb5_secure_cookie *var)
+{
+    int p = TRUE;
+    if (ref == var) return TRUE;
+    else if (ref == NULL || var == NULL) return FALSE;
+    p = p && ktest_equal_sequence_of_pa_data(ref->data, var->data);
+    p = p && ref->time == ref->time;
+    return p;
+}

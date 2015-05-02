@@ -539,6 +539,12 @@ typedef struct _krb5_kkdcp_message {
     krb5_int32 dclocator_hint;
 } krb5_kkdcp_message;
 
+/* Plain text of an encrypted PA-FX-COOKIE value produced by the KDC. */
+typedef struct _krb5_secure_cookie {
+    krb5_timestamp time;
+    krb5_pa_data **data;
+} krb5_secure_cookie;
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -920,6 +926,7 @@ void k5_free_pa_otp_challenge(krb5_context context,
                               krb5_pa_otp_challenge *val);
 void k5_free_pa_otp_req(krb5_context context, krb5_pa_otp_req *val);
 void k5_free_kkdcp_message(krb5_context context, krb5_kkdcp_message *val);
+void k5_free_secure_cookie(krb5_context context, krb5_secure_cookie *val);
 
 /* #include "krb5/wordsize.h" -- comes in through base-defs.h. */
 #include "com_err.h"
@@ -1470,6 +1477,9 @@ encode_krb5_pa_otp_enc_req(const krb5_data *, krb5_data **);
 krb5_error_code
 encode_krb5_kkdcp_message(const krb5_kkdcp_message *, krb5_data **);
 
+krb5_error_code
+encode_krb5_secure_cookie(const krb5_secure_cookie *, krb5_data **);
+
 /*************************************************************************
  * End of prototypes for krb5_encode.c
  *************************************************************************/
@@ -1642,6 +1652,9 @@ decode_krb5_pa_otp_enc_req(const krb5_data *, krb5_data **);
 
 krb5_error_code
 decode_krb5_kkdcp_message(const krb5_data *, krb5_kkdcp_message **);
+
+krb5_error_code
+decode_krb5_secure_cookie(const krb5_data *, krb5_secure_cookie **);
 
 struct _krb5_key_data;          /* kdb.h */
 

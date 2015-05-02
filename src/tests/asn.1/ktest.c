@@ -950,6 +950,13 @@ ktest_make_sample_kkdcp_message(krb5_kkdcp_message *p)
     p->dclocator_hint = 0;
 }
 
+void
+ktest_make_sample_secure_cookie(krb5_secure_cookie *p)
+{
+    ktest_make_sample_pa_data_array(&p->data);
+    p->time = 1430534594;
+}
+
 /****************************************************************/
 /* destructors */
 
@@ -1754,4 +1761,10 @@ ktest_empty_kkdcp_message(krb5_kkdcp_message *p)
     ktest_empty_data(&p->kerb_message);
     ktest_empty_data(&p->target_domain);
     p->dclocator_hint = -1;
+}
+
+void
+ktest_empty_secure_cookie(krb5_secure_cookie *p)
+{
+    ktest_empty_pa_data_array(p->data);
 }

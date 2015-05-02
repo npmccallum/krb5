@@ -831,3 +831,12 @@ k5_free_kkdcp_message(krb5_context context, krb5_kkdcp_message *val)
     free(val->kerb_message.data);
     free(val);
 }
+
+void
+k5_free_secure_cookie(krb5_context context, krb5_secure_cookie *val)
+{
+    if (val == NULL)
+        return;
+    krb5_free_pa_data(context, val->data);
+    free(val);
+}
