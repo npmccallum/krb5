@@ -73,6 +73,7 @@
 #include <kadm5/admin.h>
 #include "adm_proto.h"
 #include "extern.h"
+#include "cookie.h"
 
 static krb5_error_code
 prepare_error_as(struct kdc_request_state *, krb5_kdc_req *,
@@ -125,6 +126,9 @@ struct as_req_state {
 
     kdc_realm_t *active_realm;
     krb5_audit_state *au_state;
+
+    krb5_pa_data **in_cookie;
+    krb5_pa_data **out_cookie;
 };
 
 static void
@@ -247,6 +251,14 @@ finish_process_as_req(struct as_req_state *state, krb5_error_code errcode)
                             &state->client_keyblock, &state->pa_context);
     if (errcode) {
         state->status = "KDC_RETURN_PADATA";
+        goto egress;
+    }
+
+    errcode = cookie_encrypt(kdc_context, state->request->client,
+                             state->local_tgt, state->out_cookie,
+                             &state->e_data);
+    if (errcode) {
+        state->status = "CANT_ENCRYPT_COOKIE";
         goto egress;
     }
 
@@ -421,6 +433,8 @@ egress:
     kdc_free_rstate(state->rstate);
     krb5_free_kdc_req(kdc_context, state->request);
     assert(did_log != 0);
+    krb5_free_pa_data(kdc_context, state->in_cookie);
+    krb5_free_pa_data(kdc_context, state->out_cookie);
 
     free(state);
     (*oldrespond)(oldarg, errcode, response);
@@ -546,6 +560,8 @@ process_as_req(krb5_kdc_req *request, krb5_data *req_pkt,
     state->rock.inner_body = state->inner_body;
     state->rock.rstate = state->rstate;
     state->rock.vctx = vctx;
+    state->rock.in_cookie = state->in_cookie;
+    state->rock.out_cookie = &state->out_cookie;
     if (!state->request->client) {
         state->status = "NULL_CLIENT";
         errcode = KRB5KDC_ERR_C_PRINCIPAL_UNKNOWN;
@@ -644,6 +660,13 @@ process_as_req(krb5_kdc_req *request, krb5_data *req_pkt,
                             &state->local_tgt_storage);
     if (errcode) {
         state->status = "GET_LOCAL_TGT";
+        goto errout;
+    }
+
+    errcode = cookie_decrypt(kdc_context, request->client, state->local_tgt,
+                             request->padata, &state->in_cookie);
+    if (errcode != 0) {
+        state->status = "DECRYPT_COOKIE";
         goto errout;
     }
 

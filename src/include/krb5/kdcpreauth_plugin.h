@@ -181,6 +181,21 @@ typedef struct krb5_kdcpreauth_callbacks_st {
 
     /* End of version 2 kdcpreauth callbacks. */
 
+    /* Set some data into the secure cookie. Ownership is not transferred.
+     * If data for the specified pa_type already exists, this call fails. */
+    krb5_boolean (*set_cookie)(krb5_context context,
+                               krb5_kdcpreauth_rock rock,
+                               krb5_preauthtype pa_type,
+                               krb5_data data);
+
+    /* Get some data from the secure cookie. Ownership is not transferred.
+     * If data for the specified pa_type does not exist, this call fails. */
+    krb5_boolean (*get_cookie)(krb5_context context,
+                               krb5_kdcpreauth_rock rock,
+                               krb5_preauthtype pa_type,
+                               krb5_data *data);
+
+    /* End of version 3 kdcpreauth callbacks. */
 } *krb5_kdcpreauth_callbacks;
 
 /* Optional: preauth plugin initialization function. */

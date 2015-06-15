@@ -559,6 +559,69 @@ have_client_keys(krb5_context context, krb5_kdcpreauth_rock rock)
     return FALSE;
 }
 
+static krb5_boolean
+set_cookie(krb5_context context, krb5_kdcpreauth_rock rock,
+           krb5_preauthtype pa_type, krb5_data data)
+{
+    krb5_pa_data **c = NULL;
+    int i;
+
+    if (rock == NULL)
+        return FALSE;
+
+    c = *rock->out_cookie;
+    for (i = 0; c != NULL && c[i] != NULL; i++) {
+        if (c[i]->pa_type == pa_type)
+            return FALSE;
+    }
+
+    c = realloc(c, sizeof(*c) * (i + 2));
+    if (c == NULL)
+        return FALSE;
+    *rock->out_cookie = c;
+
+    c[i + 1] = NULL;
+    c[i] = calloc(1, sizeof(**c));
+    if (c[i] == NULL)
+        return FALSE;
+
+    c[i]->pa_type = pa_type;
+    c[i]->length = data.length;
+    c[i]->contents = calloc(data.length, 1);
+    if (c[i]->contents == NULL) {
+        free(c[i]);
+        c[i] = NULL;
+        return FALSE;
+    }
+
+    memcpy(c[i]->contents, data.data, data.length);
+    return TRUE;
+}
+
+static krb5_boolean
+get_cookie(krb5_context context, krb5_kdcpreauth_rock rock,
+           krb5_preauthtype pa_type, krb5_data *data)
+{
+    krb5_pa_data **c = NULL;
+
+    if (rock == NULL)
+        return FALSE;
+
+    c = rock->in_cookie;
+    if (c == NULL)
+        return FALSE;
+
+    for (int i = 0; c[i] != NULL; i++) {
+        if (c[i]->pa_type == pa_type) {
+            data->data = (char *) c[i]->contents;
+            data->length = c[i]->length;
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
 static struct krb5_kdcpreauth_callbacks_st callbacks = {
     2,
     max_time_skew,
@@ -570,7 +633,9 @@ static struct krb5_kdcpreauth_callbacks_st callbacks = {
     free_string,
     client_entry,
     event_context,
-    have_client_keys
+    have_client_keys,
+    set_cookie,
+    get_cookie
 };
 
 static krb5_error_code
