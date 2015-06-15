@@ -31,60 +31,81 @@
 
 #include "crypto_int.h"
 
-/*
- * Call the PRF function multiple times with the pepper prefixed with
- * a count byte  to get enough bits of output.
- */
-static krb5_error_code
-prf_plus(krb5_context context, const krb5_keyblock *k, const char *pepper,
-         size_t keybytes, char **out)
+krb5_error_code KRB5_CALLCONV
+krb5_c_prf_plus(krb5_context context, const krb5_keyblock *k,
+                const krb5_data *input, krb5_data *output)
 {
+    char ibuf[input->length + 1];
+    krb5_data in = { 0, sizeof(ibuf), ibuf };
     krb5_error_code retval = 0;
-    size_t prflen, iterations;
-    krb5_data out_data;
-    krb5_data in_data;
-    char *buffer = NULL;
-    struct k5buf prf_inbuf;
+    size_t prflen = 0;
 
-    k5_buf_init_dynamic(&prf_inbuf);
-    k5_buf_add_len(&prf_inbuf, "\001", 1);
-    k5_buf_add(&prf_inbuf, pepper);
-    retval = krb5_c_prf_length( context, k->enctype, &prflen);
+    retval = krb5_c_prf_length(context, k->enctype, &prflen);
     if (retval)
-        goto cleanup;
-    iterations = keybytes / prflen;
-    if (keybytes % prflen != 0)
-        iterations++;
-    assert(iterations <= 254);
-    buffer = k5calloc(iterations, prflen, &retval);
-    if (retval)
-        goto cleanup;
-    retval = k5_buf_status(&prf_inbuf);
-    if (retval)
-        goto cleanup;
-    in_data.length = prf_inbuf.len;
-    in_data.data = prf_inbuf.data;
-    out_data.length = prflen;
-    out_data.data = buffer;
+        return retval;
 
-    while (iterations > 0) {
-        retval = krb5_c_prf(context, k, &in_data, &out_data);
+    if (output->length > 254 * prflen)
+        return E2BIG; /* FIXME */
+
+    memcpy(&in.data[1], input->data, input->length);
+    for (size_t i = 0; i < (output->length + prflen - 1) / prflen; i++) {
+        char obuf[prflen];
+        krb5_data out = { 0, sizeof(obuf), obuf };
+
+        in.data[0] = i + 1;
+        retval = krb5_c_prf(context, k, &in, &out);
         if (retval)
-            goto cleanup;
-        out_data.data += prflen;
-        in_data.data[0]++;
-        iterations--;
+            return retval;
+
+        memcpy(&output->data[i * prflen], out.data,
+               MIN(prflen, output->length - i * prflen));
     }
 
-    *out = buffer;
-    buffer = NULL;
-
-cleanup:
-    free(buffer);
-    k5_buf_free(&prf_inbuf);
     return retval;
 }
 
+static krb5_error_code
+data2key(krb5_context context, krb5_enctype enctype, const krb5_data *input,
+         krb5_keyblock **output)
+{
+    const struct krb5_keytypes *etype = NULL;
+    krb5_error_code retval = 0;
+
+    if (!krb5_c_valid_enctype(enctype))
+        return KRB5_BAD_ENCTYPE;
+
+    etype = find_enctype(enctype);
+    assert(etype != NULL);
+
+    if (etype->enc->keybytes != input->length)
+        return EMSGSIZE; /* FIXME */
+
+    retval = krb5int_c_init_keyblock(context, enctype,
+                                     etype->enc->keylength, output);
+    if (retval != 0)
+        return retval;
+
+    retval = (*etype->rand2key)(input, *output);
+    if (retval != 0)
+        krb5int_c_free_keyblock(context, *output);
+
+    return retval;
+}
+
+krb5_error_code KRB5_CALLCONV
+krb5_c_derive(krb5_context context, const krb5_keyblock *k,
+              const krb5_data *input, krb5_keyblock **output)
+{
+    char buf[k->length];
+    krb5_data out = { 0, sizeof(buf), buf };
+    krb5_error_code retval = 0;
+
+    retval = krb5_c_prf_plus(context, k, input, &out);
+    if (retval != 0)
+        return retval;
+
+    return data2key(context, k->enctype, &out, output);
+}
 
 krb5_error_code KRB5_CALLCONV
 krb5_c_fx_cf2_simple(krb5_context context,
@@ -92,56 +113,24 @@ krb5_c_fx_cf2_simple(krb5_context context,
                      const krb5_keyblock *k2, const char *pepper2,
                      krb5_keyblock **out)
 {
-    const struct krb5_keytypes *out_enctype;
-    size_t keybytes, keylength, i;
-    char *prf1 = NULL, *prf2 = NULL;
-    krb5_data keydata;
-    krb5_enctype out_enctype_num;
+    const krb5_data p1 = { 0, strlen(pepper1), (char *) pepper1 };
+    const krb5_data p2 = { 0, strlen(pepper2), (char *) pepper2 };
+    char prfb1[k1->length];
+    char prfb2[k1->length];
+    krb5_data prf1 = { 0, sizeof(prfb1), prfb1 };
+    krb5_data prf2 = { 0, sizeof(prfb1), prfb2 };
     krb5_error_code retval = 0;
-    krb5_keyblock *out_key = NULL;
 
-    if (k1 == NULL || !krb5_c_valid_enctype(k1->enctype))
-        return KRB5_BAD_ENCTYPE;
-    if (k2 == NULL || !krb5_c_valid_enctype(k2->enctype))
-        return KRB5_BAD_ENCTYPE;
-    out_enctype_num = k1->enctype;
-    assert(out != NULL);
-    out_enctype = find_enctype(out_enctype_num);
-    assert(out_enctype != NULL);
-    if (out_enctype->prf == NULL) {
-        if (context) {
-            k5_set_error(&(context->err), KRB5_CRYPTO_INTERNAL,
-                         _("Enctype %d has no PRF"), out_enctype_num);
-        }
-        return KRB5_CRYPTO_INTERNAL;
-    }
-    keybytes = out_enctype->enc->keybytes;
-    keylength = out_enctype->enc->keylength;
+    retval = krb5_c_prf_plus(context, k1, &p1, &prf1);
+    if (retval)
+        return retval;
 
-    retval = prf_plus(context, k1, pepper1, keybytes, &prf1);
+    retval = krb5_c_prf_plus(context, k2, &p2, &prf2);
     if (retval)
-        goto cleanup;
-    retval = prf_plus(context, k2, pepper2, keybytes, &prf2);
-    if (retval)
-        goto cleanup;
-    for (i = 0; i < keybytes; i++)
-        prf1[i] ^= prf2[i];
-    retval = krb5int_c_init_keyblock(context, out_enctype_num, keylength,
-                                     &out_key);
-    if (retval)
-        goto cleanup;
-    keydata.data = prf1;
-    keydata.length = keybytes;
-    retval = (*out_enctype->rand2key)(&keydata, out_key);
-    if (retval)
-        goto cleanup;
+        return retval;
 
-    *out = out_key;
-    out_key = NULL;
+    for (size_t i = 0; i < prf1.length; i++)
+        prf1.data[i] ^= prf2.data[i];
 
-cleanup:
-    krb5int_c_free_keyblock( context, out_key);
-    zapfree(prf1, keybytes);
-    zapfree(prf2, keybytes);
-    return retval;
+    return data2key(context, k1->enctype, &prf1, out);
 }

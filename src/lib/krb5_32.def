@@ -461,3 +461,5 @@ EXPORTS
 	krb5_vprepend_error_message			@428
 	krb5_wrap_error_message 			@429
 	krb5_vwrap_error_message			@430
+	krb5_c_prf_plus					@431
+	krb5_c_derive					@432
