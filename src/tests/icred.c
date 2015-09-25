@@ -37,6 +37,8 @@
 
 #include <krb5.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <assert.h>
 
 static krb5_context ctx;
 
@@ -59,29 +61,54 @@ main(int argc, char **argv)
     const char *princstr, *password;
     krb5_principal client;
     krb5_init_creds_context icc;
+    krb5_get_init_creds_opt *opt;
     krb5_creds creds;
+    krb5_boolean stepwise = FALSE;
+    krb5_preauthtype ptypes[64];
+    int c, nptypes = 0;
 
-    if (argc != 3) {
-        fprintf(stderr, "Usage: icred princname password\n");
-        exit(1);
+    while ((c = getopt(argc, argv, "so:")) != -1) {
+        switch (c) {
+        case 's':
+            stepwise = TRUE;
+            break;
+        case 'o':
+            assert(nptypes < 64);
+            ptypes[nptypes++] = atoi(optarg);
+            break;
+        default:
+            abort();
+        }
     }
-    princstr = argv[1];
-    password = argv[2];
+
+    argc -= optind;
+    argv += optind;
+    if (argc != 2)
+        abort();
+    princstr = argv[0];
+    password = argv[1];
 
     check(krb5_init_context(&ctx));
     check(krb5_parse_name(ctx, princstr, &client));
 
-    /* Try once with the traditional interface. */
-    check(krb5_get_init_creds_password(ctx, &creds, client, password, NULL,
-                                       NULL, 0, NULL, NULL));
-    krb5_free_cred_contents(ctx, &creds);
+    check(krb5_get_init_creds_opt_alloc(ctx, &opt));
+    if (nptypes > 0)
+        krb5_get_init_creds_opt_set_preauth_list(opt, ptypes, nptypes);
 
-    /* Try again with the step interface. */
-    check(krb5_init_creds_init(ctx, client, NULL, NULL, 0, NULL, &icc));
-    check(krb5_init_creds_set_password(ctx, icc, password));
-    check(krb5_init_creds_get(ctx, icc));
-    krb5_init_creds_free(ctx, icc);
+    if (stepwise) {
+        /* Use the stepwise interface. */
+        check(krb5_init_creds_init(ctx, client, NULL, NULL, 0, NULL, &icc));
+        check(krb5_init_creds_set_password(ctx, icc, password));
+        check(krb5_init_creds_get(ctx, icc));
+        krb5_init_creds_free(ctx, icc);
+    } else {
+        /* Use the traditional one-shot interface. */
+        check(krb5_get_init_creds_password(ctx, &creds, client, password, NULL,
+                                           NULL, 0, NULL, opt));
+        krb5_free_cred_contents(ctx, &creds);
+    }
 
+    krb5_get_init_creds_opt_free(ctx, opt);
     krb5_free_principal(ctx, client);
     krb5_free_context(ctx);
     return 0;

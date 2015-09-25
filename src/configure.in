@@ -366,6 +366,31 @@ AC_SUBST(TLS_IMPL)
 AC_SUBST(TLS_IMPL_CFLAGS)
 AC_SUBST(TLS_IMPL_LIBS)
 
+# Different SPAKE groups might be implemented by different libraries.
+# For now, there is one group (P-256) implemented using OpenSSL.  If
+# we add additional groups using different libraries, more options may
+# be needed (and we may need to handle preferences between different
+# libraries for the same group).
+SPAKE=no
+AC_ARG_WITH([spake-openssl],
+AC_HELP_STRING([--with-spake-openssl],
+               [use OpenSSL for SPAKE preauth @<:@auto@:>@]),,[withval=auto])
+if test "$withval" = auto -o "$withval" = yes; then
+  AC_CHECK_LIB([crypto],[EC_POINT_new],[have_crypto=true],[have_crypto=false])
+  if test "$have_crypto" = true; then
+    AC_DEFINE(SPAKE_OPENSSL,1,[Define to use OpenSSL for SPAKE preauth])
+    SPAKE_OPENSSL_LIBS=-lcrypto
+    SPAKE=yes
+  elif test "$withval" = yes; then
+    AC_MSG_ERROR([OpenSSL libcrypto not found])
+  fi
+fi
+if test "$SPAKE" = yes; then
+  K5_GEN_MAKEFILE(plugins/preauth/spake)
+fi
+AC_SUBST(SPAKE)
+AC_SUBST(SPAKE_OPENSSL_LIBS)
+
 AC_ARG_ENABLE([aesni],
 AC_HELP_STRING([--disable-aesni],[Do not build with AES-NI support]), ,
 enable_aesni=check)

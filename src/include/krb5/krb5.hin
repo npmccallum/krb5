@@ -1019,6 +1019,8 @@ krb5_c_keyed_checksum_types(krb5_context context, krb5_enctype enctype,
 #define KRB5_KEYUSAGE_ENC_CHALLENGE_KDC 55
 #define KRB5_KEYUSAGE_AS_REQ 56
 #define KRB5_KEYUSAGE_CAMMAC 64
+#define KRB5_KEYUSAGE_SPAKE_TRANSCRIPT -1357 /* XXX need assignment */
+#define KRB5_KEYUSAGE_SPAKE_FACTOR -1358 /* XXX need assignment */
 
 #define KRB5_KEYUSAGE_PA_FX_COOKIE 513  /**< Used for encrypted FAST cookies */
 /** @} */ /* end of KRB5_KEYUSAGE group */
@@ -1864,6 +1866,7 @@ krb5_verify_checksum(krb5_context context, krb5_cksumtype ctype,
 #define KRB5_PADATA_OTP_PIN_CHANGE      144 /**< RFC 6560 section 4.3 */
 #define KRB5_PADATA_PKINIT_KX           147 /**< RFC 6112 */
 #define KRB5_ENCPADATA_REQ_ENC_PA_REP   149 /**< RFC 6806 */
+#define KRB5_PADATA_SPAKE              -135 /* XXX need assignment */
 
 #define KRB5_SAM_USE_SAD_AS_KEY         0x80000000
 #define KRB5_SAM_SEND_ENCRYPTED_SAD     0x40000000
