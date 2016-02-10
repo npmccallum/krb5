@@ -8288,6 +8288,13 @@ krb5_set_trace_callback(krb5_context context, krb5_trace_callback fn,
 krb5_error_code KRB5_CALLCONV
 krb5_set_trace_filename(krb5_context context, const char *filename);
 
+/**
+ * Validate and return the authentication indicators in a ticket.
+ */
+krb5_error_code KRB5_CALLCONV
+krb5_auth_ind_decode(krb5_context ctx, const krb5_enc_tkt_part *tkt,
+                     char ***auth_inds);
+
 #if TARGET_OS_MAC
 #    pragma pack(pop)
 #endif
