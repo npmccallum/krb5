@@ -52,15 +52,17 @@
  * to x or y, and "public element" to refer to S or T.
  */
 
-#include "k5-int.h"
-#include "internal.h"
+#include "iana.h"
+#include "trace.h"
+#include "groups.h"
+#include "openssl.h"
 
-#define DEFAULT_GROUPS_CLIENT "p256"
+#define DEFAULT_GROUPS_CLIENT "P-256"
 #define DEFAULT_GROUPS_KDC ""
 
 typedef struct groupent_st {
     const groupdef *gdef;
-    void *gdata;
+    groupdata *gdata;
 } groupent;
 
 struct groupstate_st {
@@ -78,36 +80,13 @@ struct groupstate_st {
     size_t ndata;
 };
 
-/*
- * Two group definitions are needed in order to test rejected optimistic KDC
- * challenge.  We can get rid of this dummy group definition once we have two
- * supported groups.
- */
-
-static krb5_error_code
-testgroup_keygen(krb5_context context, void *gdata, const uint8_t *wbytes,
-                 krb5_boolean use_m, uint8_t *priv_out, uint8_t *pub_out)
-{
-    *priv_out = 0;
-    *pub_out = 0;
-    return 0;
-}
-
-static krb5_error_code
-testgroup_result(krb5_context context, void *gdata, const uint8_t *wbytes,
-                 const uint8_t *ourpriv, const uint8_t *theirpub,
-                 krb5_boolean use_m, uint8_t *elem_out)
-{
-    return EINVAL;
-}
-
-static const groupdef groupdefs[] = {
+static const groupdef *groupdefs[] = {
 #ifdef SPAKE_OPENSSL
-    { "p256", GROUP_P256, 32, 33,
-      p256_init, ossl_keygen, ossl_result, ossl_free },
+    &openssl_P256,
+    &openssl_P384,
+    &openssl_P521,
 #endif
-    { "testdonotuse", -1111, 1, 1,
-      NULL, testgroup_keygen, testgroup_result, NULL }
+    NULL
 };
 
 /* Find a groupdef structure by group number; return NULL on failure. */
@@ -116,23 +95,26 @@ find_gdef(int32_t group)
 {
     size_t i;
 
-    for (i = 0; i < sizeof(groupdefs) / sizeof(*groupdefs); i++) {
-        if (groupdefs[i].group == group)
-            return &groupdefs[i];
+    for (i = 0; groupdefs[i] != NULL; i++) {
+        if (groupdefs[i]->id == group)
+            return groupdefs[i];
     }
+
     return NULL;
 }
 
-/* Find a group number by name (case-insensitive); return 0 on failure. */
+/* Find a group number by name; return 0 on failure. */
 static int32_t
 find_gnum(const char *name)
 {
     size_t i;
 
-    for (i = 0; i < sizeof(groupdefs) / sizeof(*groupdefs); i++) {
-        if (strcasecmp(name, groupdefs[i].name) == 0)
-            return groupdefs[i].group;
+    for (i = 0; groupdefs[i] != NULL; i++) {
+        const spake_iana *reg = &spake_iana_reg[groupdefs[i]->id];
+        if (strcmp(name, reg->name) == 0)
+            return groupdefs[i]->id;
     }
+
     return 0;
 }
 
@@ -145,6 +127,7 @@ in_grouplist(const int32_t *list, size_t count, int32_t group)
         if (list[i] == group)
             return TRUE;
     }
+
     return FALSE;
 }
 
@@ -152,7 +135,7 @@ in_grouplist(const int32_t *list, size_t count, int32_t group)
  * if necessary. */
 static krb5_error_code
 get_gdata(krb5_context context, groupstate *gstate, const groupdef *gdef,
-          void **gdata_out)
+          groupdata **gdata_out)
 {
     krb5_error_code ret;
     groupent *ent, *newptr;
@@ -175,8 +158,8 @@ get_gdata(krb5_context context, groupstate *gstate, const groupdef *gdef,
     ent = &gstate->data[gstate->ndata];
     ent->gdef = gdef;
     ent->gdata = NULL;
-    if (gdef->init_gdata != NULL) {
-        ret = gdef->init_gdata(context, gdef, &ent->gdata);
+    if (gdef->init != NULL) {
+        ret = gdef->init(context, gdef, &ent->gdata);
         if (ret)
             return ret;
     }
@@ -350,9 +333,10 @@ group_keygen(krb5_context context, groupstate *gstate, int32_t group,
              const krb5_keyblock *ikey, krb5_data *priv_out,
              krb5_data *pub_out)
 {
+    const spake_iana *reg = &spake_iana_reg[group];
     krb5_error_code ret;
     const groupdef *gdef;
-    void *gdata;
+    groupdata *gdata;
     uint8_t *wbytes = NULL, *priv = NULL, *pub = NULL;
 
     *priv_out = empty_data();
@@ -364,13 +348,13 @@ group_keygen(krb5_context context, groupstate *gstate, int32_t group,
     if (ret)
         return ret;
 
-    ret = derive_wbytes(context, ikey, gdef->scalar_len, &wbytes);
+    ret = derive_wbytes(context, ikey, reg->mult_len, &wbytes);
     if (ret)
         goto cleanup;
-    priv = k5alloc(gdef->scalar_len, &ret);
+    priv = k5alloc(reg->mult_len, &ret);
     if (priv == NULL)
         goto cleanup;
-    pub = k5alloc(gdef->elem_len, &ret);
+    pub = k5alloc(reg->elem_len, &ret);
     if (pub == NULL)
         goto cleanup;
 
@@ -378,14 +362,14 @@ group_keygen(krb5_context context, groupstate *gstate, int32_t group,
     if (ret)
         goto cleanup;
 
-    *priv_out = make_data(priv, gdef->scalar_len);
-    *pub_out = make_data(pub, gdef->elem_len);
+    *priv_out = make_data(priv, reg->mult_len);
+    *pub_out = make_data(pub, reg->elem_len);
     priv = pub = NULL;
     TRACE_SPAKE_KEYGEN(context, pub_out);
 
 cleanup:
-    zapfree(wbytes, gdef->scalar_len);
-    zapfree(priv, gdef->scalar_len);
+    zapfree(wbytes, reg->mult_len);
+    zapfree(priv, reg->mult_len);
     free(pub);
     return ret;
 }
@@ -400,26 +384,27 @@ group_result(krb5_context context, groupstate *gstate, int32_t group,
              const krb5_keyblock *ikey, const krb5_data *ourpriv,
              const krb5_data *theirpub, krb5_data *spakeresult_out)
 {
+    const spake_iana *reg = &spake_iana_reg[group];
     krb5_error_code ret;
     const groupdef *gdef;
-    void *gdata;
+    groupdata *gdata;
     uint8_t *wbytes = NULL, *spakeresult = NULL;
 
     *spakeresult_out = empty_data();
     gdef = find_gdef(group);
     if (gdef == NULL)
         return EINVAL;
-    if (ourpriv->length != gdef->scalar_len ||
-        theirpub->length != gdef->elem_len)
+    if (ourpriv->length != reg->mult_len ||
+        theirpub->length != reg->elem_len)
         return EINVAL;
     ret = get_gdata(context, gstate, gdef, &gdata);
     if (ret)
         return ret;
 
-    ret = derive_wbytes(context, ikey, gdef->scalar_len, &wbytes);
+    ret = derive_wbytes(context, ikey, reg->mult_len, &wbytes);
     if (ret)
         goto cleanup;
-    spakeresult = k5alloc(gdef->elem_len, &ret);
+    spakeresult = k5alloc(reg->elem_len, &ret);
     if (spakeresult == NULL)
         goto cleanup;
 
@@ -430,13 +415,13 @@ group_result(krb5_context context, groupstate *gstate, int32_t group,
     if (ret)
         goto cleanup;
 
-    *spakeresult_out = make_data(spakeresult, gdef->elem_len);
+    *spakeresult_out = make_data(spakeresult, reg->elem_len);
     spakeresult = NULL;
     TRACE_SPAKE_RESULT(context, spakeresult_out);
 
 cleanup:
-    zapfree(wbytes, gdef->scalar_len);
-    zapfree(spakeresult, gdef->elem_len);
+    zapfree(wbytes, reg->mult_len);
+    zapfree(spakeresult, reg->elem_len);
     return ret;
 }
 
@@ -446,8 +431,9 @@ group_free_state(groupstate *gstate)
     groupent *ent;
 
     for (ent = gstate->data; ent < gstate->data + gstate->ndata; ent++) {
-        if (ent->gdata != NULL && ent->gdef->free_gdata != NULL)
-            ent->gdef->free_gdata(ent->gdata);
+        if (ent->gdata != NULL && ent->gdef->fini != NULL)
+            ent->gdef->fini(ent->gdata);
     }
+
     free(gstate->data);
 }

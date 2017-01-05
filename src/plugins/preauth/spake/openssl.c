@@ -31,194 +31,212 @@
  */
 
 #include "k5-int.h"
-#include "internal.h"
+
+#include "openssl.h"
+#include "iana.h"
 
 #ifdef SPAKE_OPENSSL
 #include <openssl/bn.h>
 #include <openssl/ec.h>
 #include <openssl/obj_mac.h>
 
-typedef struct odata_st {
+struct groupdata_st {
     const groupdef *gdef;
-    BN_CTX *ctx;
     EC_GROUP *group;
     BIGNUM *order;
+    BN_CTX *ctx;
     EC_POINT *M;
     EC_POINT *N;
-} odata;
+};
 
-static odata *
-create_odata(int nid, uint8_t *M, uint8_t *N, const groupdef *gdef)
+static void
+openssl_fini(groupdata *gd)
 {
-    odata *od;
+    if (gd == NULL)
+        return;
 
-    od = calloc(1, sizeof(*od));
-    if (od == NULL)
-        return NULL;
-    od->gdef = gdef;
+    EC_GROUP_free(gd->group);
+    EC_POINT_free(gd->M);
+    EC_POINT_free(gd->N);
+    BN_CTX_free(gd->ctx);
+    BN_free(gd->order);
+}
 
-    od->ctx = BN_CTX_new();
-    if (od->ctx == NULL)
+static krb5_error_code
+openssl_init(krb5_context context, const groupdef *gdef, groupdata **gdata_out)
+{
+    const spake_iana *reg = NULL;
+    groupdata *gd;
+    int nid;
+
+    switch (gdef->id) {
+    case SPAKE_GROUP_P256: nid = NID_X9_62_prime256v1; break;
+    case SPAKE_GROUP_P384: nid = NID_secp384r1;        break;
+    case SPAKE_GROUP_P521: nid = NID_secp521r1;        break;
+    default: return ENOTSUP;
+    };
+
+    reg = &spake_iana_reg[gdef->id];
+
+    gd = calloc(1, sizeof(*gd));
+    if (gd == NULL)
+        return ENOMEM;
+    gd->gdef = gdef;
+
+    gd->group = EC_GROUP_new_by_curve_name(nid);
+    if (gd->group == NULL)
         goto error;
 
-    od->group = EC_GROUP_new_by_curve_name(nid);
-    if (od->group == NULL)
+    gd->ctx = BN_CTX_new();
+    if (gd->ctx == NULL)
         goto error;
 
-    od->order = BN_new();
-    if (od->order == NULL)
+    gd->order = BN_new();
+    if (gd->order == NULL)
         goto error;
-    if (!EC_GROUP_get_order(od->group, od->order, od->ctx))
-        goto error;
-
-    od->M = EC_POINT_new(od->group);
-    if (od->M == NULL)
-        goto error;
-    if (!EC_POINT_oct2point(od->group, od->M, M, gdef->elem_len, od->ctx))
+    if (!EC_GROUP_get_order(gd->group, gd->order, gd->ctx))
         goto error;
 
-    od->N = EC_POINT_new(od->group);
-    if (od->N == NULL)
+    gd->M = EC_POINT_new(gd->group);
+    if (gd->M == NULL)
         goto error;
-    if (!EC_POINT_oct2point(od->group, od->N, N, gdef->elem_len, od->ctx))
+    if (!EC_POINT_oct2point(gd->group, gd->M, reg->m, reg->elem_len, gd->ctx))
         goto error;
 
-    return od;
+    gd->N = EC_POINT_new(gd->group);
+    if (gd->N == NULL)
+        goto error;
+    if (!EC_POINT_oct2point(gd->group, gd->N, reg->n, reg->elem_len, gd->ctx))
+        goto error;
+
+    *gdata_out = gd;
+    return 0;
 
 error:
-    ossl_free(od);
+    openssl_fini(gd);
+    return ENOMEM;
+}
+
+/* Convert pseudo-random bytes into a scalar value in constant time.
+ * Return NULL on failure. */
+static inline BIGNUM *
+unmarshal_w(const groupdata *gdata, const uint8_t *wbytes)
+{
+    const spake_iana *reg = &spake_iana_reg[gdata->gdef->id];
+    BIGNUM *w = NULL;
+
+    w = BN_new();
+    if (!w)
+        return NULL;
+
+    BN_set_flags(w, BN_FLG_CONSTTIME);
+
+    if (BN_bin2bn(wbytes, reg->mult_len, w) &&
+        BN_div(NULL, w, w, gdata->order, gdata->ctx))
+        return w;
+
+    BN_free(w);
     return NULL;
 }
 
-krb5_error_code
-p256_init(krb5_context context, const groupdef *gdef, void **gdata_out)
+static krb5_error_code
+openssl_keygen(krb5_context context, groupdata *gdata, const uint8_t *wbytes,
+               krb5_boolean use_m, uint8_t *prv_out, uint8_t *pub_out)
 {
-    *gdata_out = create_odata(NID_X9_62_prime256v1, P256_M, P256_N, gdef);
-    return (*gdata_out == NULL) ? ENOMEM : 0;
-}
-
-/* Convert pseudo-random bytes into a scalar value according to the spec.
- * Return NULL on failure. */
-static BIGNUM *
-unmarshal_w(const groupdef *gdef, const uint8_t *wbytes)
-{
-    BIGNUM *w;
-
-    /*
-     * P-256 requires no sanitization.  Other curves might require clearing
-     * some of the high bits (e.g. P-521 would require clearing the high seven
-     * bits).
-     */
-
-    w = BN_new();
-    if (w == NULL)
-        return NULL;
-    if (!BN_bin2bn(wbytes, gdef->scalar_len, w)) {
-        BN_clear_free(w);
-        return NULL;
-    }
-    return w;
-}
-
-krb5_error_code
-ossl_keygen(krb5_context context, void *gdata, const uint8_t *wbytes,
-            krb5_boolean use_m, uint8_t *priv_out, uint8_t *pub_out)
-{
-    odata *od = gdata;
-    const groupdef *gdef = od->gdef;
-    EC_GROUP *group = od->group;
-    BN_CTX *ctx = od->ctx;
-    EC_POINT *pub = NULL, *constant;
-    BIGNUM *priv = NULL, *w = NULL;
+    const spake_iana *reg = &spake_iana_reg[gdata->gdef->id];
+    const EC_POINT *constant = use_m ? gdata->M : gdata->N;
     krb5_boolean success = FALSE;
-    size_t len;
+    EC_POINT *pub = NULL;
+    BIGNUM *prv = NULL;
+    BIGNUM *w = NULL;
 
-    priv = BN_new();
-    if (priv == NULL)
-        goto cleanup;
-    if (!BN_rand_range(priv, od->order))
-        goto cleanup;
-
-    w = unmarshal_w(gdef, wbytes);
-    if (w == NULL)
+    w = unmarshal_w(gdata, wbytes);
+    if (!w)
         goto cleanup;
 
-    /* Compute priv*G + w*constant; EC_POINT_mul() does this in one call. */
-    pub = EC_POINT_new(group);
+    pub = EC_POINT_new(gdata->group);
     if (pub == NULL)
         goto cleanup;
-    constant = use_m ? od->M : od->N;
-    if (!EC_POINT_mul(group, pub, priv, constant, w, ctx))
+
+    prv = BN_new();
+    if (prv == NULL)
         goto cleanup;
 
-    /* Marshal priv into priv_out. */
-    memset(priv_out, 0, gdef->scalar_len);
-    BN_bn2bin(priv, priv_out + gdef->scalar_len - BN_num_bytes(priv));
+    if (!BN_rand_range(prv, gdata->order))
+        goto cleanup;
+
+    /* Compute prv*G + w*constant; EC_POINT_mul() does this in one call. */
+    if (!EC_POINT_mul(gdata->group, pub, prv, constant, w, gdata->ctx))
+        goto cleanup;
+
+    /* Marshal prv into prv_out. */
+    memset(prv_out, 0, reg->mult_len);
+    BN_bn2bin(prv, &prv_out[reg->mult_len - BN_num_bytes(prv)]);
 
     /* Marshal pub into pub_out. */
-    len = EC_POINT_point2oct(group, pub, POINT_CONVERSION_COMPRESSED, pub_out,
-                             gdef->elem_len, ctx);
-    if (len != gdef->elem_len)
+    if (EC_POINT_point2oct(gdata->group, pub, POINT_CONVERSION_COMPRESSED,
+                           pub_out, reg->elem_len, gdata->ctx)
+            != reg->elem_len)
         goto cleanup;
 
     success = TRUE;
 
 cleanup:
-    BN_clear_free(priv);
-    BN_clear_free(w);
     EC_POINT_free(pub);
+    BN_clear_free(prv);
+    BN_clear_free(w);
     return success ? 0 : ENOMEM;
 }
 
-krb5_error_code
-ossl_result(krb5_context context, void *gdata, const uint8_t *wbytes,
-            const uint8_t *ourpriv, const uint8_t *theirpub,
-            krb5_boolean use_m, uint8_t *elem_out)
+static krb5_error_code
+openssl_result(krb5_context context, groupdata *gdata, const uint8_t *wbytes,
+               const uint8_t *ourprv, const uint8_t *theirpub,
+               krb5_boolean use_m, uint8_t *elem_out)
 {
-    odata *od = gdata;
-    const groupdef *gdef = od->gdef;
-    EC_GROUP *group = od->group;
-    BN_CTX *ctx = od->ctx;
-    EC_POINT *pub = NULL, *result = NULL, *constant;
-    BIGNUM *priv = NULL, *w = NULL;
-    krb5_boolean success = FALSE, invalid = FALSE;
-    size_t len;
+    const spake_iana *reg = &spake_iana_reg[gdata->gdef->id];
+    const EC_POINT *constant = use_m ? gdata->M : gdata->N;
+    krb5_boolean success = FALSE;
+    krb5_boolean invalid = FALSE;
+    EC_POINT *result = NULL;
+    EC_POINT *pub = NULL;
+    BIGNUM *priv = NULL;
+    BIGNUM *w = NULL;
 
-    w = unmarshal_w(gdef, wbytes);
+    w = unmarshal_w(gdata, wbytes);
     if (w == NULL)
         goto cleanup;
 
-    priv = BN_bin2bn(ourpriv, gdef->scalar_len, NULL);
+    priv = BN_bin2bn(ourprv, reg->mult_len, NULL);
     if (priv == NULL)
         goto cleanup;
 
-    pub = EC_POINT_new(group);
+    pub = EC_POINT_new(gdata->group);
     if (pub == NULL)
         goto cleanup;
-    if (!EC_POINT_oct2point(group, pub, theirpub, gdef->elem_len, ctx)) {
+    if (!EC_POINT_oct2point(gdata->group, pub, theirpub,
+                            reg->elem_len, gdata->ctx)) {
         invalid = TRUE;
         goto cleanup;
     }
 
     /* Compute result = priv*(pub - w*constant), using result to hold the
      * intermediate steps. */
-    result = EC_POINT_new(group);
+    result = EC_POINT_new(gdata->group);
     if (result == NULL)
         goto cleanup;
-    constant = use_m ? od->M : od->N;
-    if (!EC_POINT_mul(group, result, NULL, constant, w, ctx))
+    if (!EC_POINT_mul(gdata->group, result, NULL, constant, w, gdata->ctx))
         goto cleanup;
-    if (!EC_POINT_invert(group, result, ctx))
+    if (!EC_POINT_invert(gdata->group, result, gdata->ctx))
         goto cleanup;
-    if (!EC_POINT_add(group, result, pub, result, ctx))
+    if (!EC_POINT_add(gdata->group, result, pub, result, gdata->ctx))
         goto cleanup;
-    if (!EC_POINT_mul(group, result, NULL, result, priv, ctx))
+    if (!EC_POINT_mul(gdata->group, result, NULL, result, priv, gdata->ctx))
         goto cleanup;
 
     /* Marshal result into elem_out. */
-    len = EC_POINT_point2oct(group, result, POINT_CONVERSION_COMPRESSED,
-                             elem_out, gdef->elem_len, ctx);
-    if (len != gdef->elem_len)
+    if (EC_POINT_point2oct(gdata->group, result, POINT_CONVERSION_COMPRESSED,
+                           elem_out, reg->elem_len, gdata->ctx)
+            != reg->elem_len)
         goto cleanup;
 
     success = TRUE;
@@ -231,17 +249,27 @@ cleanup:
     return invalid ? EINVAL : (success ? 0 : ENOMEM);
 }
 
-void
-ossl_free(void *gdata)
-{
-    odata *od = gdata;
+groupdef openssl_P256 = {
+    .id = SPAKE_GROUP_P256,
+    .init = openssl_init,
+    .keygen = openssl_keygen,
+    .result = openssl_result,
+    .fini = openssl_fini,
+};
 
-    if (od == NULL)
-        return;
-    EC_POINT_free(od->M);
-    EC_POINT_free(od->N);
-    EC_GROUP_free(od->group);
-    BN_CTX_free(od->ctx);
-}
+groupdef openssl_P384 = {
+    .id = SPAKE_GROUP_P384,
+    .init = openssl_init,
+    .keygen = openssl_keygen,
+    .result = openssl_result,
+    .fini = openssl_fini,
+};
 
+groupdef openssl_P521 = {
+    .id = SPAKE_GROUP_P521,
+    .init = openssl_init,
+    .keygen = openssl_keygen,
+    .result = openssl_result,
+    .fini = openssl_fini,
+};
 #endif /* SPAKE_OPENSSL */

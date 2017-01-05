@@ -31,7 +31,8 @@
  */
 
 #include "k5-int.h"
-#include "internal.h"
+#include "trace.h"
+#include "util.h"
 
 /* Use data to construct a single-element pa-data list of type
  * KRB5_PADATA_SPAKE.  Claim data's memory on success or failure. */

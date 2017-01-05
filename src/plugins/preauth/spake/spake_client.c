@@ -32,7 +32,10 @@
 
 #include "k5-int.h"
 #include "k5-spake.h"
-#include "internal.h"
+#include "trace.h"
+#include "util.h"
+#include "iana.h"
+#include "groups.h"
 #include <krb5/clpreauth_plugin.h>
 
 typedef struct reqstate_st {
@@ -212,7 +215,7 @@ process_challenge(krb5_context context, groupstate *gstate, reqstate *st,
                      der_req, 1, &k1);
     if (ret)
         goto cleanup;
-    factor.type = SF_NONE;
+    factor.type = SPAKE_SF_NONE;
     factor.data = NULL;
     ret = encode_krb5_spake_factor(&factor, &der_factor);
     if (ret)

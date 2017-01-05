@@ -33,7 +33,12 @@
 #include "k5-int.h"
 #include "k5-input.h"
 #include "k5-spake.h"
-#include "internal.h"
+
+#include "groups.h"
+#include "trace.h"
+#include "iana.h"
+#include "util.h"
+
 #include <krb5/kdcpreauth_plugin.h>
 
 /*
@@ -204,7 +209,7 @@ send_challenge(krb5_context context, groupstate *gstate, int32_t group,
 
     /* Encode the challenge. */
     /* XXX hardcoded SF-NONE for now */
-    f.type = SF_NONE;
+    f.type = SPAKE_SF_NONE;
     f.data = NULL;
     flist[0] = &f;
     flist[1] = NULL;
@@ -414,7 +419,7 @@ verify_response(krb5_context context, groupstate *gstate,
         goto cleanup;
 
     /* XXX SF-NONE only */
-    if (factor->type != SF_NONE) {
+    if (factor->type != SPAKE_SF_NONE) {
         ret = EINVAL;
         goto cleanup;
     }
