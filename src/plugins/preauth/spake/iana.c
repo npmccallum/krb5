@@ -31,6 +31,7 @@
  */
 
 #include "iana.h"
+#include <string.h>
 
 static uint8_t P256_M[] = {
     0x02, 0x88, 0x6e, 0x2f, 0x97, 0xac, 0xe4, 0x6e, 0x55, 0xba, 0x9d, 0xd7,
@@ -78,9 +79,36 @@ static uint8_t P521_N[] = {
     0xc3, 0x49, 0xd9, 0x55, 0x75, 0xcd, 0x25
 };
 
-const spake_iana spake_iana_reg[] = {
-    {},
-    { "P-256", sizeof(P256_M) - 1, sizeof(P256_M), P256_M, P256_N },
-    { "P-384", sizeof(P384_M) - 1, sizeof(P384_M), P384_M, P384_N },
-    { "P-521", sizeof(P521_M) - 1, sizeof(P521_M), P521_M, P521_N },
+static const spake_iana registry[] = {
+    { SPAKE_GROUP_P256, "P-256",
+      sizeof(P256_M) - 1, sizeof(P256_M), P256_M, P256_N },
+    { SPAKE_GROUP_P384, "P-384",
+      sizeof(P384_M) - 1, sizeof(P384_M), P384_M, P384_N },
+    { SPAKE_GROUP_P521, "P-521",
+      sizeof(P521_M) - 1, sizeof(P521_M), P521_M, P521_N },
+    {}
 };
+
+const spake_iana *spake_iana_by_id(int32_t id)
+{
+    size_t i = 0;
+
+    for (i = 0; registry[i].name != NULL; i++) {
+        if (registry[i].id == id)
+            return &registry[i];
+    }
+
+    return NULL;
+}
+
+const spake_iana *spake_iana_by_name(const char *name)
+{
+    size_t i = 0;
+
+    for (i = 0; registry[i].name != NULL; i++) {
+        if (strcmp(registry[i].name, name) == 0)
+            return &registry[i];
+    }
+
+    return NULL;
+}

@@ -55,7 +55,7 @@
 #include "iana.h"
 #include "trace.h"
 #include "groups.h"
-#include "openssl.h"
+#include "ossl.h"
 
 #define DEFAULT_GROUPS_CLIENT "P-256"
 #define DEFAULT_GROUPS_KDC ""
@@ -82,9 +82,9 @@ struct groupstate_st {
 
 static const groupdef *groupdefs[] = {
 #ifdef SPAKE_OPENSSL
-    &openssl_P256,
-    &openssl_P384,
-    &openssl_P521,
+    &ossl_P256,
+    &ossl_P384,
+    &ossl_P521,
 #endif
     NULL
 };
@@ -101,21 +101,6 @@ find_gdef(int32_t group)
     }
 
     return NULL;
-}
-
-/* Find a group number by name; return 0 on failure. */
-static int32_t
-find_gnum(const char *name)
-{
-    size_t i;
-
-    for (i = 0; groupdefs[i] != NULL; i++) {
-        const spake_iana *reg = &spake_iana_reg[groupdefs[i]->id];
-        if (strcmp(name, reg->name) == 0)
-            return groupdefs[i]->id;
-    }
-
-    return 0;
 }
 
 static krb5_boolean
@@ -174,8 +159,9 @@ parse_groups(krb5_context context, char *str, int32_t **list_out,
              size_t *count_out)
 {
     const char *const delim = " \t\r\n,";
+    int32_t *newptr, *list = NULL;
+    const spake_iana *reg = NULL;
     char *token, *save = NULL;
-    int32_t group, *newptr, *list = NULL;
     size_t count = 0;
 
     *list_out = NULL;
@@ -184,12 +170,12 @@ parse_groups(krb5_context context, char *str, int32_t **list_out,
     /* Walk through the words in profstr. */
     for (token = strtok_r(str, delim, &save); token != NULL;
          token = strtok_r(NULL, delim, &save)) {
-        group = find_gnum(token);
-        if (!group) {
+        reg = spake_iana_by_name(token);
+        if (reg == NULL) {
             TRACE_SPAKE_UNKNOWN_GROUP(context, token);
             continue;
         }
-        if (in_grouplist(list, count, group))
+        if (in_grouplist(list, count, reg->id))
             continue;
         newptr = realloc(list, (count + 1) * sizeof(*list));
         if (newptr == NULL) {
@@ -197,7 +183,7 @@ parse_groups(krb5_context context, char *str, int32_t **list_out,
             return ENOMEM;
         }
         list = newptr;
-        list[count++] = group;
+        list[count++] = reg->id;
     }
 
     *list_out = list;
@@ -211,11 +197,12 @@ krb5_error_code
 group_init_state(krb5_context context, krb5_boolean is_kdc,
                  groupstate **gstate_out)
 {
+    char *profstr1 = NULL, *profstr2 = NULL;
+    const spake_iana *reg = NULL;
+    int32_t *permitted = NULL;
+    const char *defgroups;
     krb5_error_code ret;
     groupstate *gstate;
-    const char *defgroups;
-    char *profstr1 = NULL, *profstr2 = NULL;
-    int32_t *permitted = NULL, challenge_group = 0;
     size_t npermitted;
 
     *gstate_out = NULL;
@@ -247,8 +234,8 @@ group_init_state(krb5_context context, krb5_boolean is_kdc,
         if (ret)
             goto cleanup;
         if (profstr2 != NULL) {
-            challenge_group = find_gnum(profstr2);
-            if (!in_grouplist(permitted, npermitted, challenge_group))
+            reg = spake_iana_by_name(profstr2);
+            if (reg == NULL || !in_grouplist(permitted, npermitted, reg->id))
                 TRACE_SPAKE_BAD_KDC_CHALLENGE_GROUP(context, profstr2);
         }
     }
@@ -259,7 +246,7 @@ group_init_state(krb5_context context, krb5_boolean is_kdc,
     gstate->is_kdc = is_kdc;
     gstate->permitted = permitted;
     gstate->npermitted = npermitted;
-    gstate->challenge_group = challenge_group;
+    gstate->challenge_group = reg != NULL ? ret;
     permitted = NULL;
     gstate->data = NULL;
     gstate->ndata = 0;

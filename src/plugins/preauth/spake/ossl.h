@@ -30,15 +30,15 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef OPENSSL_H
-#define OPENSSL_H
+#ifndef OSSL_H
+#define OSSL_H
 
 #include "groups.h"
 
 #ifdef SPAKE_OPENSSL
-extern groupdef openssl_P256;
-extern groupdef openssl_P384;
-extern groupdef openssl_P521;
+extern groupdef ossl_P256;
+extern groupdef ossl_P384;
+extern groupdef ossl_P521;
 #endif /* SPAKE_OPENSSL */
 
-#endif /* OPENSSL_H */
+#endif /* OSSL_H */

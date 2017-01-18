@@ -13,13 +13,13 @@ RELDIR=../plugins/preauth/spake
 SHLIB_EXPDEPS=$(KRB5_BASE_DEPLIBS)
 SHLIB_EXPLIBS=$(KRB5_BASE_LIBS) $(SPAKE_OPENSSL_LIBS)
 
-STLIBOBJS=util.o iana.o groups.o openssl.o spake_client.o spake_kdc.o
+STLIBOBJS=util.o iana.o groups.o ossl.o spake_client.o spake_kdc.o
 
 SRCS= \
 	$(srcdir)/util.c \
 	$(srcdir)/iana.c \
 	$(srcdir)/groups.c \
-	$(srcdir)/openssl.c \
+	$(srcdir)/ossl.c \
 	$(srcdir)/spake_client.c \
 	$(srcdir)/spake_kdc.c
 

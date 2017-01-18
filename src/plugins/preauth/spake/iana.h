@@ -47,6 +47,7 @@ typedef enum {
 } spake_group;
 
 typedef struct {
+    int32_t id;
     const char *name;
     size_t mult_len;
     size_t elem_len;
@@ -54,6 +55,7 @@ typedef struct {
     const uint8_t *n;
 } spake_iana;
 
-extern const spake_iana spake_iana_reg[];
+const spake_iana *spake_iana_by_id(int32_t id);
+const spake_iana *spake_iana_by_name(const char *name);
 
 #endif /* IANA_H */

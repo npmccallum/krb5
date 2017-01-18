@@ -1,5 +1,5 @@
 /* -*- mode: c; c-basic-offset: 4; indent-tabs-mode: nil -*- */
-/* plugins/preauth/spake/openssl.c - SPAKE implementations using OpenSSL */
+/* plugins/preauth/spake/ossl.c - SPAKE implementations using OpenSSL */
 /*
  * Copyright (C) 2015 by the Massachusetts Institute of Technology.
  * All rights reserved.
@@ -32,7 +32,7 @@
 
 #include "k5-int.h"
 
-#include "openssl.h"
+#include "ossl.h"
 #include "iana.h"
 
 #ifdef SPAKE_OPENSSL
@@ -50,7 +50,7 @@ struct groupdata_st {
 };
 
 static void
-openssl_fini(groupdata *gd)
+fini(groupdata *gd)
 {
     if (gd == NULL)
         return;
@@ -63,7 +63,7 @@ openssl_fini(groupdata *gd)
 }
 
 static krb5_error_code
-openssl_init(krb5_context context, const groupdef *gdef, groupdata **gdata_out)
+init(krb5_context context, const groupdef *gdef, groupdata **gdata_out)
 {
     const spake_iana *reg = NULL;
     groupdata *gd;
@@ -113,13 +113,13 @@ openssl_init(krb5_context context, const groupdef *gdef, groupdata **gdata_out)
     return 0;
 
 error:
-    openssl_fini(gd);
+    fini(gd);
     return ENOMEM;
 }
 
 /* Convert pseudo-random bytes into a scalar value in constant time.
  * Return NULL on failure. */
-static inline BIGNUM *
+static BIGNUM *
 unmarshal_w(const groupdata *gdata, const uint8_t *wbytes)
 {
     const spake_iana *reg = &spake_iana_reg[gdata->gdef->id];
@@ -140,8 +140,8 @@ unmarshal_w(const groupdata *gdata, const uint8_t *wbytes)
 }
 
 static krb5_error_code
-openssl_keygen(krb5_context context, groupdata *gdata, const uint8_t *wbytes,
-               krb5_boolean use_m, uint8_t *prv_out, uint8_t *pub_out)
+keygen(krb5_context context, groupdata *gdata, const uint8_t *wbytes,
+       krb5_boolean use_m, uint8_t *prv_out, uint8_t *pub_out)
 {
     const spake_iana *reg = &spake_iana_reg[gdata->gdef->id];
     const EC_POINT *constant = use_m ? gdata->M : gdata->N;
@@ -189,9 +189,9 @@ cleanup:
 }
 
 static krb5_error_code
-openssl_result(krb5_context context, groupdata *gdata, const uint8_t *wbytes,
-               const uint8_t *ourprv, const uint8_t *theirpub,
-               krb5_boolean use_m, uint8_t *elem_out)
+result(krb5_context context, groupdata *gdata, const uint8_t *wbytes,
+       const uint8_t *ourprv, const uint8_t *theirpub,
+       krb5_boolean use_m, uint8_t *elem_out)
 {
     const spake_iana *reg = &spake_iana_reg[gdata->gdef->id];
     const EC_POINT *constant = use_m ? gdata->M : gdata->N;
@@ -249,27 +249,27 @@ cleanup:
     return invalid ? EINVAL : (success ? 0 : ENOMEM);
 }
 
-groupdef openssl_P256 = {
+groupdef ossl_P256 = {
     .id = SPAKE_GROUP_P256,
-    .init = openssl_init,
-    .keygen = openssl_keygen,
-    .result = openssl_result,
-    .fini = openssl_fini,
+    .init = init,
+    .keygen = keygen,
+    .result = result,
+    .fini = fini,
 };
 
-groupdef openssl_P384 = {
+groupdef ossl_P384 = {
     .id = SPAKE_GROUP_P384,
-    .init = openssl_init,
-    .keygen = openssl_keygen,
-    .result = openssl_result,
-    .fini = openssl_fini,
+    .init = init,
+    .keygen = keygen,
+    .result = result,
+    .fini = fini,
 };
 
-groupdef openssl_P521 = {
+groupdef ossl_P521 = {
     .id = SPAKE_GROUP_P521,
-    .init = openssl_init,
-    .keygen = openssl_keygen,
-    .result = openssl_result,
-    .fini = openssl_fini,
+    .init = init,
+    .keygen = keygen,
+    .result = result,
+    .fini = fini,
 };
 #endif /* SPAKE_OPENSSL */
